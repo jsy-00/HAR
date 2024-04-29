@@ -77,10 +77,15 @@ if uploaded_file is not None:
             # Predict the class of the video
             predicted_class, predictions = predict_video("temp_video.mp4")
 
+            top_5_indices = np.argsort(predictions[0])[::-1][:5]
+            top_5_classes = [CLASSES_LIST[i] for i in top_5_indices]
+            top_5_scores = [predictions[0][i] for i in top_5_indices]
+
+            # Display the top 5 predicted classes and their confidence scores
             st.success(f"Predicted Class: {predicted_class}")
-            st.write("Confidence Scores:")
-            for i, class_name in enumerate(CLASSES_LIST):
-                st.write(f"{class_name}: {predictions[0][i]}")
+            st.write("Top 5 Probable Classes")
+            for class_name, score in zip(top_5_classes, top_5_scores):
+                st.write(f"{class_name}: {score}")
 
 
 
