@@ -10,6 +10,9 @@ import random
 from keras.models import load_model
 import streamlit as st
 
+import matplotlib
+matplotlib.use('Agg')
+
 # Load the trained model with custom objects
 custom_objects = {'ConvLSTM2D': ConvLSTM2D, 'MaxPooling3D': MaxPooling3D, 'TimeDistributed': TimeDistributed,
                   'Dropout': Dropout, 'Flatten': Flatten, 'Dense': Dense}
