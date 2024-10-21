@@ -26,7 +26,7 @@ Users can upload their own videos, and the app will perform activity recognition
 
 **Installation**
 To run this project locally, follow these steps:
-git clone https://github.com/yourusername/Human-Activity-Recognition.git
+git clone https://github.com/nihcas1/Human-Activity-Recognition.git
 
 Install the required dependencies:
 pip install -r requirements.txt
