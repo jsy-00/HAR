@@ -58,7 +58,7 @@ def predict_video(video_path):
     return predicted_class, predictions
 
 # Streamlit app
-st.title("Human Activity Recognition")
+st.title("SMU Diecasting Classification")
 st.write("Upload a video file to predict the human activity.")
 
 uploaded_file = st.file_uploader("Choose a video file", type=["Avi"])
