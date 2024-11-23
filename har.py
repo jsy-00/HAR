@@ -1,86 +1,101 @@
-from keras.layers import ConvLSTM2D, MaxPooling3D, TimeDistributed, Dropout, Flatten, Dense
-from keras.models import Sequential
-from keras.utils import to_categorical
-from keras.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split
+import boto3  # AWS S3 SDK
+import tensorflow as tf
+from tensorflow.keras.models import load_model # type: ignore
+from tensorflow.keras.layers import ConvLSTM2D, MaxPooling3D, TimeDistributed, Dropout, Flatten, Dense # type: ignore
 import numpy as np
 import cv2
-import os
-import random
-from keras.models import load_model
 import streamlit as st
+import boto3
+from datetime import datetime
+import os
 
-import matplotlib
-matplotlib.use('Agg')
+# AWS S3 설정
+S3_BUCKET = "cv-7-video"
+S3_REGION = "us-east-1"
+S3_BASE_URL = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/video/"
+s3_client = boto3.client('s3', region_name=S3_REGION)
 
-# 커스텀 객체로 모델 로드에 필요한 레이어 및 구성 요소 정의
-custom_objects = {'ConvLSTM2D': ConvLSTM2D, 'MaxPooling3D': MaxPooling3D, 'TimeDistributed': TimeDistributed,
-                  'Dropout': Dropout, 'Flatten': Flatten, 'Dense': Dense}
+# NG/OK 분류 클래스
+CLASSES_LIST = ['NG', 'OK']
 
-# 사전에 학습된 모델 로드
-model = load_model("video.h5", custom_objects=custom_objects)
+# 사전에 학습된 NG/OK 모델 로드
+model = load_model("video_ng_ok.h5")
 
-# 예측 가능한 클래스 리스트 정의
-CLASSES_LIST = ['Archery', 'BabyCrawling', 'BenchPress', 'Biking', 'Bowling', 'FrontCrawl',
-                'HandstandPushups', 'HeadMassage', 'HighJump', 'HorseRace', 'JavelinThrow',
-                'LongJump', 'PlayingPiano', 'PullUps', 'Punch', 'Shotput', 'SkyDiving', 'SoccerPenalty',
-                'SumoWrestling', 'Surfing', 'Typing'
-                ]
-
-# 비디오 프레임 전처리 함수 정의
+# 비디오 전처리 함수
 def preprocess_frames(video_path, sequence_length=25):
-    frames_list = []  # 프레임을 저장할 리스트
-    video_reader = cv2.VideoCapture(video_path)  # 비디오 파일 로드
-    video_frames_count = int(video_reader.get(cv2.CAP_PROP_FRAME_COUNT))  # 비디오의 총 프레임 수 계산
-    skip_frames_window = max(int(video_frames_count / sequence_length), 1)  # 시퀀스 길이에 맞게 프레임 간격 설정
+    frames_list = []
+    video_reader = cv2.VideoCapture(video_path)
+    video_frames_count = int(video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
+    skip_frames_window = max(int(video_frames_count / sequence_length), 1)
     
     for frame_counter in range(sequence_length):
-        # 지정된 위치의 프레임 읽기
         video_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_counter * skip_frames_window)
         success, frame = video_reader.read()
-        if not success:  # 읽기 실패 시 중단
+        if not success:
             break
-        resized_frame = cv2.resize(frame, (64, 64))  # 프레임 크기 조정
-        normalized_frame = resized_frame / 255.0  # 프레임 정규화
+        resized_frame = cv2.resize(frame, (64, 64))
+        normalized_frame = resized_frame / 255.0
         frames_list.append(normalized_frame)
     
-    video_reader.release()  # 비디오 리더 닫기
-    return np.array(frames_list)  # 프레임 배열 반환
+    video_reader.release()
+    return np.array(frames_list)
 
-# 비디오 예측 함수 정의
+# 비디오 처리 및 분류 함수
 def predict_video(video_path):
-    preprocessed_frames = preprocess_frames(video_path)  # 비디오 전처리
-    preprocessed_frames = np.expand_dims(preprocessed_frames, axis=0)  # 모델 입력 형태에 맞게 변환
-    predictions = model.predict(preprocessed_frames)  # 모델로 예측 실행
-    predicted_class_index = np.argmax(predictions)  # 예측 결과 중 가장 높은 확률의 클래스 인덱스 선택
-    predicted_class = CLASSES_LIST[predicted_class_index]  # 예측된 클래스명 가져오기
-    return predicted_class, predictions
+    preprocessed_frames = preprocess_frames(video_path)
+    preprocessed_frames = np.expand_dims(preprocessed_frames, axis=0)
+    predictions = model.predict(preprocessed_frames)
+    all_class_scores = {CLASSES_LIST[i]: predictions[0][i] for i in range(len(CLASSES_LIST))}
+    predicted_class_index = np.argmax(predictions)
+    predicted_class = CLASSES_LIST[predicted_class_index]
+    return predicted_class, all_class_scores
 
-# Streamlit 애플리케이션 UI 구성
-st.title("SMU Diecasting Classification")  # 제목 설정
-st.write("Upload a video file to predict NG or OK")  # 설명 텍스트 출력
+# S3에 비디오 업로드 함수
+def upload_video_to_s3(local_file_path):
+    # 고유 파일명 생성
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    s3_file_name = f"video_ng_ok_{timestamp}.mp4"
+    
+    # S3로 업로드
+    s3_client.upload_file(local_file_path, S3_BUCKET, f"video/{s3_file_name}")
+    s3_url = f"{S3_BASE_URL}{s3_file_name}"
+    return s3_url, s3_file_name
 
-uploaded_file = st.file_uploader("Choose a video file", type=["mp4"])  # 파일 업로드 컴포넌트
+# S3에서 비디오 다운로드 함수
+def download_video_from_s3(s3_file_name):
+    local_video_path = f"temp_{s3_file_name}"
+    s3_client.download_file(S3_BUCKET, f"video/{s3_file_name}", local_video_path)
+    return local_video_path
+
+# Streamlit 애플리케이션
+st.title("Diecasting NG/OK Classification")
+st.write("Upload a diecasting video to classify as NG (Defective) or OK (Good Quality)")
+
+uploaded_file = st.file_uploader("Choose a video file", type=["mp4"])
 
 if uploaded_file is not None:
-    st.video(uploaded_file)  # 업로드된 비디오 표시
+    # 로컬에 업로드된 비디오 저장
+    temp_file_path = f"temp_{uploaded_file.name}"
+    with open(temp_file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    st.video(temp_file_path)  # 업로드된 비디오 표시
 
-    if st.button("Predict"):  # "Predict" 버튼 클릭 시 실행
-        with st.spinner('Predicting...'):  # 로딩 메시지 표시
-            # 업로드된 비디오를 임시 파일로 저장
-            with open("temp_video.mp4", "wb") as f:
-                f.write(uploaded_file.getbuffer())
+    if st.button("Predict"):
+        with st.spinner("Uploading to S3 and Predicting..."):
+            # S3에 비디오 업로드
+            s3_url, s3_file_name = upload_video_to_s3(temp_file_path)
+            st.write(f"Video uploaded to S3: [View Here]({s3_url})")
 
-            # 비디오 클래스 예측 실행
-            predicted_class, predictions = predict_video("temp_video.mp4")
+            # S3에서 비디오 다운로드 후 처리
+            local_video_path = download_video_from_s3(s3_file_name)
+            predicted_class, all_class_scores = predict_video(local_video_path)
 
-            # 상위 5개의 예측 클래스와 점수 계산
-            top_5_indices = np.argsort(predictions[0])[::-1][:5]
-            top_5_classes = [CLASSES_LIST[i] for i in top_5_indices]
-            top_5_scores = [predictions[0][i] for i in top_5_indices]
+            # 최종 결과 출력
+            st.success(f"Predicted Class: {predicted_class}")
+            st.write("All Class Scores:")
+            for class_name, score in all_class_scores.items():
+                st.write(f"{class_name}: {score}")
 
-            # 예측 결과 출력
-            st.success(f"Predicted Class: {predicted_class}")  # 최종 예측 클래스 출력
-            st.write("Top 5 Probable Classes")  # 상위 5개 클래스 출력
-            for class_name, score in zip(top_5_classes, top_5_scores):
-                st.write(f"{class_name}: {score}")  # 클래스와 점수 출력
+        # 임시 파일 삭제
+        os.remove(temp_file_path)
