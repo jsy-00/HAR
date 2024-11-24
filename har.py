@@ -146,9 +146,9 @@ def display_results(unique_images, results):
     # 최종 NG/OK 부품 번호 출력
     st.subheader("Final Result Summary")
     if ng_No:
-        st.error(f"NG Parts: {','.join(map(str, ng_No))} (Total: {len(ng_No)})")
+        st.error(f"NG Parts: {', '.join(map(str, ng_No))} (Total: {len(ng_No)})")
     if ok_No:
-        st.success(f"OK Parts: {','.join(map(str, ok_No))} (Total: {len(ok_No)})")
+        st.success(f"OK Parts: {', '.join(map(str, ok_No))} (Total: {len(ok_No)})")
             
 
 # 메인 함수
@@ -174,33 +174,32 @@ def main():
         st.video(temp_video_path)
     
         # 영상 이미지 추출
-        if st.button("Abstract Image from Video"):
-            with st.spinner("Processing..."):
-                unique_images = process_video(temp_video_path, tolerance=5)
-                st.session_state["unique_images"] = unique_images  # 세션 상태에 저장
-                st.success(f"Complete: {len(unique_images)} Images Abstracted")
+        with st.spinner("Extracting images from video..."):
+            unique_images = process_video(temp_video_path, tolerance=5)
+            st.session_state["unique_images"] = unique_images  # 세션 상태에 저장
+            st.success(f"Total {len(unique_images)} images extraction")
+        
+        # SageMaker 분석
+        with st.spinner("Analyzing images with SageMaker..."):
+            progress_bar = st.progress(0)  # 진행바
+            status_text = st.empty()       # 상태 메시지 표시용
             
-            # # 고유 프레임 확인
-            # st.subheader("Abstracted Images")
-            # for i, frame in enumerate(st.session_state["unique_images"]):
-            #     st.image(frame, channels="BGR", caption=f"Frame {i+1}")
+            results = []
+            for i, image in enumerate(st.session_state["unique_images"]):
+                status_text.text(f"Processing image {i + 1}/{len(st.session_state["unique_images"])}")
+                
+                result = invoke_sagemaker_endpoint('test-endpoint', image)
+                results.append(result)    
+                
+                # 진행률 업데이트
+                progress_bar.progress((i + 1) / len(st.session_state["unique_images"]))  
+                      
+            progress_bar.empty()
+            status_text.text("All images processed!")
+            st.session_state["results"] = results
         
-        # SageMaker 분석
-        st.subheader("Start SageMaker Inference")
-        endpoint_name = "test-endpoint"
-        
-        # SageMaker 분석
-        if st.button("Start Inference"):
-            if not st.session_state["unique_images"]:  # 고유 프레임이 없는 경우 에러 처리
-                st.error("No frames available. Please extract frames first!")
-            else:
-                results = []
-                for i, image in enumerate(st.session_state["unique_images"]):
-                    with st.spinner(f"Image {i+1}/{len(st.session_state['unique_images'])} processing..."):
-                        result = invoke_sagemaker_endpoint(endpoint_name, image)
-                        results.append(result)
-                st.success("Inference Complete!")
-                display_results(st.session_state["unique_images"], results)
+        # 분석 결과 표시
+        display_results(st.session_state["unique_images"], results)
                 
 
 # 프로그램 실행
