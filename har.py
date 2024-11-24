@@ -1,25 +1,45 @@
-import boto3  # AWS S3 SDK
+import requests
+import os
 import tensorflow as tf
-from tensorflow.keras.models import load_model # type: ignore
-from tensorflow.keras.layers import ConvLSTM2D, MaxPooling3D, TimeDistributed, Dropout, Flatten, Dense # type: ignore
+from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import ConvLSTM2D, MaxPooling3D, TimeDistributed, Dropout, Flatten, Dense
 import numpy as np
 import cv2
 import streamlit as st
-import boto3
 from datetime import datetime
-import os
 
-# AWS S3 설정
-S3_BUCKET = "cv-7-video"
-S3_REGION = "us-east-1"
-S3_BASE_URL = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/video/"
-s3_client = boto3.client('s3', region_name=S3_REGION)
+# HTTPS 모델 URL
+MODEL_URL = "https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/video_ng_ok.h5"
+LOCAL_MODEL_PATH = "video_ng_ok.h5"  # 로컬에 저장할 모델 파일명
 
 # NG/OK 분류 클래스
 CLASSES_LIST = ['NG', 'OK']
 
-# 사전에 학습된 NG/OK 모델 로드
-model = load_model("https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/")
+# HTTPS URL에서 모델 다운로드 함수
+def download_model_from_url():
+    if not os.path.exists(LOCAL_MODEL_PATH):  # 이미 로컬에 모델 파일이 없는 경우
+        with st.spinner("Downloading model from URL..."):
+            response = requests.get(MODEL_URL, stream=True)
+            if response.status_code == 200:
+                with open(LOCAL_MODEL_PATH, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=1024):
+                        if chunk:  # 빈 내용 방지
+                            f.write(chunk)
+                st.success("Model downloaded successfully!")
+            else:
+                st.error(f"Failed to download model. Status code: {response.status_code}")
+                raise Exception("Model download failed")
+    else:
+        st.info(f"Model already exists locally at {LOCAL_MODEL_PATH}")
+
+# 모델 로드 함수
+def load_trained_model():
+    download_model_from_url()
+    model = load_model(LOCAL_MODEL_PATH)  # 로컬에 저장된 모델 로드
+    return model
+
+# 모델 로드
+model = load_trained_model()
 
 # 비디오 전처리 함수
 def preprocess_frames(video_path, sequence_length=25):
@@ -50,23 +70,6 @@ def predict_video(video_path):
     predicted_class = CLASSES_LIST[predicted_class_index]
     return predicted_class, all_class_scores
 
-# S3에 비디오 업로드 함수
-def upload_video_to_s3(local_file_path):
-    # 고유 파일명 생성
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    s3_file_name = f"video_ng_ok_{timestamp}.mp4"
-    
-    # S3로 업로드
-    s3_client.upload_file(local_file_path, S3_BUCKET, f"video/{s3_file_name}")
-    s3_url = f"{S3_BASE_URL}{s3_file_name}"
-    return s3_url, s3_file_name
-
-# S3에서 비디오 다운로드 함수
-def download_video_from_s3(s3_file_name):
-    local_video_path = f"temp_{s3_file_name}"
-    s3_client.download_file(S3_BUCKET, f"video/{s3_file_name}", local_video_path)
-    return local_video_path
-
 # Streamlit 애플리케이션
 st.title("Diecasting NG/OK Classification")
 st.write("Upload a diecasting video to classify as NG (Defective) or OK (Good Quality)")
@@ -82,14 +85,9 @@ if uploaded_file is not None:
     st.video(temp_file_path)  # 업로드된 비디오 표시
 
     if st.button("Predict"):
-        with st.spinner("Uploading to S3 and Predicting..."):
-            # S3에 비디오 업로드
-            s3_url, s3_file_name = upload_video_to_s3(temp_file_path)
-            st.write(f"Video uploaded to S3: [View Here]({s3_url})")
-
-            # S3에서 비디오 다운로드 후 처리
-            local_video_path = download_video_from_s3(s3_file_name)
-            predicted_class, all_class_scores = predict_video(local_video_path)
+        with st.spinner("Predicting..."):
+            # 로컬 파일로 처리
+            predicted_class, all_class_scores = predict_video(temp_file_path)
 
             # 최종 결과 출력
             st.success(f"Predicted Class: {predicted_class}")
