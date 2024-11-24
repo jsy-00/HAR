@@ -5,9 +5,11 @@ __pycache__/
 
 # 환경설정 파일
 .env
+streamlit_env/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 
 # Virtual environments
 venv/
+

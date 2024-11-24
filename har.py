@@ -3,7 +3,11 @@ import cv2
 import streamlit as st
 import numpy as np
 import json
-from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+# .env 파일 로드
+load_dotenv()
 
 # 이미지 해시 함수
 def get_image_hash(image):
@@ -46,7 +50,13 @@ def process_video(video_path, tolerance=5):
 
 # SageMaker 호출 함수
 def invoke_sagemaker_endpoint(endpoint_name, image):
-    runtime = boto3.client("sagemaker-runtime", region_name="ap-northeast-1")
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    aws_region = os.getenv("AWS_REGION")
+    runtime = boto3.client("sagemaker-runtime",
+                           aws_access_key_id=aws_access_key,
+                           aws_secret_access_key=aws_secret_key,
+                           region_name=aws_region)
     _, img_encoded = cv2.imencode(".jpg", image)
     payload = img_encoded.tobytes()
     response = runtime.invoke_endpoint(
