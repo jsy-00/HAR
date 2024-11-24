@@ -1,54 +1,49 @@
+import tensorflow as tf
 import requests
 import os
 import tarfile
-from keras.models import load_model
+import boto3
 import numpy as np
 import cv2
 import streamlit as st
-from datetime import datetime
 
-# HTTPS 모델 URL
-MODEL_URL = "https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/efficientnet/model.tar.gz"
-LOCAL_MODEL_DIR = "model_directory"  # 압축 해제 후 저장할 디렉토리
-LOCAL_MODEL_PATH = os.path.join(LOCAL_MODEL_DIR, "saved_model.h5")  # 모델 파일 경로
+# AWS S3 설정
+S3_BUCKET = "cv-diecasting-7"
+S3_REGION = "us-east-1"
+MODEL_KEY = "models/efficientnet/model.tar.gz"
+LOCAL_MODEL_DIR = "model_directory"
 
 # NG/OK 분류 클래스
 CLASSES_LIST = ['NG', 'OK']
 
-# HTTPS URL에서 모델 다운로드 및 압축 해제 함수
-def download_and_extract_model():
-    if not os.path.exists(LOCAL_MODEL_DIR):  # 모델 디렉토리가 없는 경우
+# 모델 다운로드 함수 (S3에서 다운로드)
+def download_model_from_s3():
+    if not os.path.exists(LOCAL_MODEL_DIR):  # 모델 디렉토리가 없는 경우 생성
         os.makedirs(LOCAL_MODEL_DIR)
-    if not os.path.exists(LOCAL_MODEL_PATH):  # 모델 파일이 없는 경우
-        with st.spinner("Downloading and extracting model from URL..."):
-            response = requests.get(MODEL_URL, stream=True)
-            if response.status_code == 200:
-                tar_path = os.path.join(LOCAL_MODEL_DIR, "model.tar.gz")
-                with open(tar_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=1024):
-                        if chunk:
-                            f.write(chunk)
-                # 압축 해제
-                with tarfile.open(tar_path, "r:gz") as tar:
-                    tar.extractall(path=LOCAL_MODEL_DIR)
-                st.success("Model downloaded and extracted successfully!")
-            else:
-                st.error(f"Failed to download model. Status code: {response.status_code}")
-                raise Exception("Model download failed")
+    if not os.path.exists(os.path.join(LOCAL_MODEL_DIR, "saved_model")):  # 모델 디렉토리에 저장된 모델이 없는 경우
+        with st.spinner("Downloading model from S3..."):
+            s3_client = boto3.client('s3', region_name=S3_REGION)
+            tar_path = os.path.join(LOCAL_MODEL_DIR, "model.tar.gz")
+            with open(tar_path, 'wb') as f:
+                s3_client.download_fileobj(S3_BUCKET, MODEL_KEY, f)
+            # 압축 해제
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar.extractall(path=LOCAL_MODEL_DIR)
+            st.success("Model downloaded and extracted successfully!")
     else:
-        st.info(f"Model already exists locally at {LOCAL_MODEL_PATH}")
+        st.info("Model already exists locally.")
 
 # 모델 로드 함수
 def load_trained_model():
     try:
-        download_and_extract_model()
-        model = load_model(LOCAL_MODEL_PATH)  # 로컬에 저장된 모델 로드
+        download_model_from_s3()
+        model = tf.keras.models.load_model(os.path.join(LOCAL_MODEL_DIR, "saved_model"))  # TensorFlow의 SavedModel 로드
         st.success("Model loaded successfully!")
         return model
     except Exception as e:
         st.error("Failed to load the model. Please check the model file or URL.")
         print(f"Error loading model: {e}")
-        return None  # 모델 로드 실패 시 None 반환
+        return None
 
 # 모델 로드
 model = load_trained_model()
@@ -105,7 +100,6 @@ if uploaded_file is not None:
             predicted_class, all_class_scores = predict_video(temp_file_path)
 
             if predicted_class and all_class_scores:
-                # 최종 결과 출력
                 st.success(f"Predicted Class: {predicted_class}")
                 st.write("All Class Scores:")
                 for class_name, score in all_class_scores.items():
