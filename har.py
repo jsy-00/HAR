@@ -1,31 +1,37 @@
 import requests
 import os
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import ConvLSTM2D, MaxPooling3D, TimeDistributed, Dropout, Flatten, Dense
+import tarfile
+from keras.models import load_model
 import numpy as np
 import cv2
 import streamlit as st
 from datetime import datetime
 
 # HTTPS 모델 URL
-MODEL_URL = "https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/video_ng_ok.h5"
-LOCAL_MODEL_PATH = "video_ng_ok.h5"  # 로컬에 저장할 모델 파일명
+MODEL_URL = "https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/efficientnet/model.tar.gz"
+LOCAL_MODEL_DIR = "model_directory"  # 압축 해제 후 저장할 디렉토리
+LOCAL_MODEL_PATH = os.path.join(LOCAL_MODEL_DIR, "saved_model.h5")  # 모델 파일 경로
 
 # NG/OK 분류 클래스
 CLASSES_LIST = ['NG', 'OK']
 
-# HTTPS URL에서 모델 다운로드 함수
-def download_model_from_url():
-    if not os.path.exists(LOCAL_MODEL_PATH):  # 이미 로컬에 모델 파일이 없는 경우
-        with st.spinner("Downloading model from URL..."):
+# HTTPS URL에서 모델 다운로드 및 압축 해제 함수
+def download_and_extract_model():
+    if not os.path.exists(LOCAL_MODEL_DIR):  # 모델 디렉토리가 없는 경우
+        os.makedirs(LOCAL_MODEL_DIR)
+    if not os.path.exists(LOCAL_MODEL_PATH):  # 모델 파일이 없는 경우
+        with st.spinner("Downloading and extracting model from URL..."):
             response = requests.get(MODEL_URL, stream=True)
             if response.status_code == 200:
-                with open(LOCAL_MODEL_PATH, "wb") as f:
+                tar_path = os.path.join(LOCAL_MODEL_DIR, "model.tar.gz")
+                with open(tar_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=1024):
-                        if chunk:  # 빈 내용 방지
+                        if chunk:
                             f.write(chunk)
-                st.success("Model downloaded successfully!")
+                # 압축 해제
+                with tarfile.open(tar_path, "r:gz") as tar:
+                    tar.extractall(path=LOCAL_MODEL_DIR)
+                st.success("Model downloaded and extracted successfully!")
             else:
                 st.error(f"Failed to download model. Status code: {response.status_code}")
                 raise Exception("Model download failed")
@@ -34,9 +40,15 @@ def download_model_from_url():
 
 # 모델 로드 함수
 def load_trained_model():
-    download_model_from_url()
-    model = load_model(LOCAL_MODEL_PATH)  # 로컬에 저장된 모델 로드
-    return model
+    try:
+        download_and_extract_model()
+        model = load_model(LOCAL_MODEL_PATH)  # 로컬에 저장된 모델 로드
+        st.success("Model loaded successfully!")
+        return model
+    except Exception as e:
+        st.error("Failed to load the model. Please check the model file or URL.")
+        print(f"Error loading model: {e}")
+        return None  # 모델 로드 실패 시 None 반환
 
 # 모델 로드
 model = load_trained_model()
@@ -62,6 +74,9 @@ def preprocess_frames(video_path, sequence_length=25):
 
 # 비디오 처리 및 분류 함수
 def predict_video(video_path):
+    if model is None:
+        st.error("Model is not loaded. Prediction cannot be performed.")
+        return None, None
     preprocessed_frames = preprocess_frames(video_path)
     preprocessed_frames = np.expand_dims(preprocessed_frames, axis=0)
     predictions = model.predict(preprocessed_frames)
@@ -89,11 +104,12 @@ if uploaded_file is not None:
             # 로컬 파일로 처리
             predicted_class, all_class_scores = predict_video(temp_file_path)
 
-            # 최종 결과 출력
-            st.success(f"Predicted Class: {predicted_class}")
-            st.write("All Class Scores:")
-            for class_name, score in all_class_scores.items():
-                st.write(f"{class_name}: {score}")
+            if predicted_class and all_class_scores:
+                # 최종 결과 출력
+                st.success(f"Predicted Class: {predicted_class}")
+                st.write("All Class Scores:")
+                for class_name, score in all_class_scores.items():
+                    st.write(f"{class_name}: {score}")
 
         # 임시 파일 삭제
         os.remove(temp_file_path)
