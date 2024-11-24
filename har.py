@@ -5,6 +5,8 @@ import numpy as np
 import json
 from dotenv import load_dotenv
 import os
+# 더미 데이터 용
+import random
 
 # .env 파일 로드
 load_dotenv()
@@ -67,14 +69,87 @@ def invoke_sagemaker_endpoint(endpoint_name, image):
     result = json.loads(response["Body"].read().decode())
     return result["predicted_class"]
 
-# 결과 표시 함수
+# 이미지 테두리 추가
+def add_border(image, color, border_thickness=50):
+    return cv2.copyMakeBorder(
+        image,
+        top=border_thickness,
+        bottom=border_thickness,
+        left=border_thickness,
+        right=border_thickness,
+        borderType=cv2.BORDER_CONSTANT,
+        value=color
+    )
+    
+# 결과 표시 함수 (5개씩 묶어서 표시)
 def display_results(unique_images, results):
-    st.subheader("분석 결과")
-    for i, (frame, predicted_class) in enumerate(zip(unique_images, results)):
-        label = "OK" if predicted_class == 1 else "NG"
-        color = (0, 255, 0) if predicted_class == 1 else (0, 0, 255)
-        cv2.putText(frame, f"Prediction: {label}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-        st.image(frame, channels="BGR", caption=f"Frame {i+1}: {label}")
+    st.subheader("Predict Result")
+    
+    ng_images = []
+    ng_No = set()
+    ok_No = set()
+
+    # 5개씩 묶어서 처리
+    for i in range(0, len(results), 5):
+        batch_results = results[i:i+5]  # 현재 묶음 결과
+        batch_images = unique_images[i:i+5]  # 현재 묶음 이미지
+        
+        # 부품 상태 결정 (하나라도 NG이면 전체 NG)
+        batch_status = "NG" if 0 in batch_results else "OK"
+        color = (0, 255, 0) if batch_status == "OK" else (0, 0, 255)
+        
+        # 최종 결과 표시용
+        part_number = i // 5 + 1
+        if batch_status == "NG":
+            ng_No.add(part_number)
+        else:
+            ok_No.add(part_number)
+
+        # 부품 상태 표시
+        st.markdown(f"### No. {i//5 + 1}: **{batch_status}**")
+
+        cols = st.columns(5)
+        # 각 이미지에 결과 표시
+        for j, (image, status) in enumerate(zip(batch_images, batch_results)):
+            label = "OK" if status == 1 else "NG"
+            label_color = (0, 255, 0) if status == 1 else (0, 0, 255)
+            
+            # NG 이미지 저장
+            if status == 0:
+                ng_images.append((image, i + j))
+            
+            bordered_image = add_border(image, label_color)
+            part_number = (i + j) // 5 + 1
+            channel_number = (i + j) % 5 + 1
+            cols[j].image(
+                bordered_image,
+                channels="BGR",
+                caption=f"Part {part_number} - Channel {channel_number} ({label})",
+            )
+    # NG 이미지만 추가 출력
+    if ng_images:
+        st.subheader("Final NG Images")
+        cols = st.columns(5)
+        for idx, (ng_image, ng_index) in enumerate(ng_images):
+            part_number = ng_index // 5 + 1
+            channel_number = ng_index % 5 + 1
+            
+            bordered_ng_image = add_border(ng_image, (0, 0, 255))
+            
+            # 이미지 출력: 부품 번호와 채널 번호 표시
+            cols[idx % 5].image(
+                bordered_ng_image, 
+                channels="BGR", 
+                caption=f"No. {part_number} - Channel {channel_number}"
+            )
+    
+    # 최종 NG/OK 부품 번호 출력
+    st.subheader("Final Result Summary")
+    if ng_No:
+        st.error(f"NG Parts: {','.join(map(str, ng_No))} (Total: {len(ng_No)})")
+    if ok_No:
+        st.success(f"OK Parts: {','.join(map(str, ok_No))} (Total: {len(ok_No)})")
+            
 
 # 메인 함수
 def main():
@@ -112,7 +187,7 @@ def main():
         
         # SageMaker 분석
         st.subheader("Start SageMaker Inference")
-        endpoint_name = "efficientnet-diecasting-endpoint"
+        endpoint_name = "test-endpoint"
         
         # SageMaker 분석
         if st.button("Start Inference"):
@@ -126,6 +201,7 @@ def main():
                         results.append(result)
                 st.success("Inference Complete!")
                 display_results(st.session_state["unique_images"], results)
+                
 
 # 프로그램 실행
 if __name__ == "__main__":
