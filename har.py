@@ -19,7 +19,7 @@ s3_client = boto3.client('s3', region_name=S3_REGION)
 CLASSES_LIST = ['NG', 'OK']
 
 # 사전에 학습된 NG/OK 모델 로드
-model = load_model("video_ng_ok.h5")
+model = load_model("https://cv-diecasting-7.s3.us-east-1.amazonaws.com/models/")
 
 # 비디오 전처리 함수
 def preprocess_frames(video_path, sequence_length=25):
