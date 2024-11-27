@@ -9,7 +9,7 @@ import os
 import random
 
 # .env 파일 로드
-load_dotenv()
+load_dotenv(dotenv_path="AWS.env")
 
 # 이미지 해시 함수
 def get_image_hash(image):
@@ -52,13 +52,16 @@ def process_video(video_path, tolerance=5):
 
 # SageMaker 호출 함수
 def invoke_sagemaker_endpoint(endpoint_name, image):
-    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    aws_region = os.getenv("AWS_REGION")
+    #aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    #aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    #aws_region = os.getenv("AWS_REGION")
     runtime = boto3.client("sagemaker-runtime",
-                           aws_access_key_id=aws_access_key,
-                           aws_secret_access_key=aws_secret_key,
-                           region_name=aws_region)
+                           aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                           aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+                           region_name=os.getenv("AWS_REGION"))
+                           #aws_access_key_id=aws_access_key,
+                           #aws_secret_access_key=aws_secret_key,
+                           #region_name=aws_region)
     _, img_encoded = cv2.imencode(".jpg", image)
     payload = img_encoded.tobytes()
     response = runtime.invoke_endpoint(
@@ -153,55 +156,63 @@ def display_results(unique_images, results):
 
 # 메인 함수
 def main():
-    # Streamlit 애플리케이션
     st.title("Real-time NG/OK Video Classification")
+
+    # 과거 데이터 초기화
+    if "past_data" not in st.session_state:
+        st.session_state["past_data"] = []
     
-    # 고유 프레임 저장용 세션 상태 초기화
-    if "unique_images" not in st.session_state:
-        st.session_state["unique_images"] = []
-    
+    # 비디오 업로드
     uploaded_file = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi"])
 
     if uploaded_file is not None:
-        # 업로드된 비디오를 임시 파일로 저장
         temp_video_path = f"temp_{uploaded_file.name}"
         with open(temp_video_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        st.success(f"Complete Upload File : {uploaded_file.name}")
-    
-        # 업로드 출력
+        st.success(f"Uploaded File: {uploaded_file.name}")
+
         st.subheader("Uploaded Video")
         st.video(temp_video_path)
-    
-        # 영상 이미지 추출
+
+        # 영상 처리
         with st.spinner("Extracting images from video..."):
             unique_images = process_video(temp_video_path, tolerance=5)
-            st.session_state["unique_images"] = unique_images  # 세션 상태에 저장
-            st.success(f"Total {len(unique_images)} images extraction")
-        
+            st.session_state["unique_images"] = unique_images
+            st.success(f"{len(unique_images)} unique images extracted.")
+
         # SageMaker 분석
         with st.spinner("Analyzing images with SageMaker..."):
-            progress_bar = st.progress(0)  # 진행바
-            status_text = st.empty()       # 상태 메시지 표시용
-            
+            progress_bar = st.progress(0)
             results = []
-            for i, image in enumerate(st.session_state["unique_images"]):
-                status_text.text(f"Processing image {i + 1}/{len(st.session_state["unique_images"])}")
-                
-                result = invoke_sagemaker_endpoint('test-endpoint', image)
-                results.append(result)    
-                
-                # 진행률 업데이트
-                progress_bar.progress((i + 1) / len(st.session_state["unique_images"]))  
-                      
+            for i, image in enumerate(unique_images):
+                #result = invoke_sagemaker_endpoint("test-endpoint", image)
+                result = invoke_sagemaker_endpoint("diecasting-model-T7-endpoint", image)
+                results.append(result)
+                progress_bar.progress((i + 1) / len(unique_images))
             progress_bar.empty()
-            status_text.text("All images processed!")
             st.session_state["results"] = results
-        
-        # 분석 결과 표시
-        display_results(st.session_state["unique_images"], results)
+
+        # 결과 표시
+        display_results(unique_images, results)
+
+        # 결과 저장 버튼
+        if st.button("Save Current Results to History"):
+            st.session_state["past_data"].append({
+                "video_name": uploaded_file.name,
+                "unique_images": unique_images,
+                "results": results
+            })
+            st.success("Current results saved to history!")
+
+    # 과거 데이터 조회
+    st.subheader("Past Data")
+    for i, data in enumerate(st.session_state["past_data"]):
+        with st.expander(f"Dataset {i+1}: {data['video_name']}"):
+            st.write(f"Video Name: {data['video_name']}")
+            display_results(data["unique_images"], data["results"])
                 
 
 # 프로그램 실행
 if __name__ == "__main__":
     main()
+
